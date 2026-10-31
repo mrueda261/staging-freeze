@@ -17,6 +17,10 @@ on:
         description: Horas hasta la liberación automática (1-24)
         type: number
         default: 4
+      forzar:
+        description: Liberar un congelamiento de otra persona
+        type: boolean
+        default: false
   schedule:
     - cron: '*/15 * * * *'
 
@@ -53,20 +57,35 @@ jobs:
           ACCION: ${{ inputs.accion }}
           MOTIVO: ${{ inputs.motivo }}
           HORAS: ${{ inputs.horas }}
+          FORZAR: ${{ inputs.forzar }}
           ACTOR: ${{ github.actor }}
         run: |
           now=$(date -u +%FT%TZ)
           # Live read: vars.* is a snapshot from when the run was queued
           current=$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/STAGING_FREEZE" --jq .value 2>/dev/null || true)
+          owner=$(jq -r '.by // empty' <<<"$current" 2>/dev/null || true)
+          until=$(jq -r '.until // empty' <<<"$current" 2>/dev/null || true)
+          active=false
+          if [ -n "$until" ] && [[ "$until" > "$now" ]]; then active=true; fi
+          held_by="@$owner hasta $(TZ=America/Bogota date -d "${until:-$now}" +%H:%M): $(jq -r '.reason // empty' <<<"$current" 2>/dev/null || true)"
 
           if [ "$EVENT" = schedule ]; then
-            until=$(jq -r '.until // empty' <<<"$current" 2>/dev/null || true)
-            if [ -n "$until" ] && [[ "$until" > "$now" ]]; then
+            if [ "$active" = true ]; then
               echo "Sigue congelado hasta $until"
               echo "changed=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             ACCION=liberar
+          # Only the owner may extend their freeze or release it; others must force a release
+          elif [ "$active" = true ] && [ "$owner" != "$ACTOR" ]; then
+            if [ "$ACCION" = congelar ]; then
+              echo "::error::Staging ya está congelado por $held_by"
+              exit 1
+            elif [ "$FORZAR" != true ]; then
+              echo "::error::Staging está congelado por $held_by. Para liberarlo igual, marca 'forzar'"
+              exit 1
+            fi
+            echo "⚠️ Liberación forzada por @$ACTOR del congelamiento de $held_by" >> "$GITHUB_STEP_SUMMARY"
           fi
 
           if [ "$ACCION" = congelar ]; then
