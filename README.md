@@ -25,7 +25,8 @@ Actions. Sin servidores, sin bots externos y sin tocar Odoo.
 
 ```mermaid
 flowchart LR
-    U[Desarrollador] -->|Run workflow: congelar / liberar| T[staging-freeze.yml]
+    U[Desarrollador] -->|Staging: congelar| T[staging-freeze.yml]
+    U -->|Staging: liberar| T
     T -->|escribe| V[(Variable STAGING_FREEZE)]
     T -->|actualiza el check| P[PRs abiertos a staging]
     G[staging-freeze-guard.yml] -->|lee| V
@@ -38,17 +39,19 @@ flowchart LR
 
 | Archivo | Qué hace |
 |---|---|
-| `.github/workflows/staging-freeze.yml` | Botón para congelar o liberar (motivo y horas: 1-24, o 0 sin vencimiento). Libera solo al vencer, con un cron que no gasta minutos mientras no haya un congelamiento con vencimiento. Al cambiar de estado, actualiza el check de todos los PR abiertos. |
+| `.github/workflows/staging-freeze-congelar.yml` | Botón **Staging: congelar**: motivo y horas (1-24, o 0 sin vencimiento). |
+| `.github/workflows/staging-freeze-liberar.yml` | Botón **Staging: liberar** (con `forzar`), y el cron que libera al vencer. El cron no gasta minutos mientras no haya un congelamiento con vencimiento. |
+| `.github/workflows/staging-freeze.yml` | Núcleo que comparten los dos botones: aplica las reglas, guarda el estado y actualiza el check de todos los PR abiertos. |
 | `.github/workflows/staging-freeze-guard.yml` | Pone el check en cada PR a staging. Usa `pull_request_target`: corre la versión de la rama base, así que un PR no puede modificar el guard para aprobarse solo. |
 | `.github/actions/staging-freeze-status/` | Lógica compartida: decide verde o rojo y redacta el mensaje. Un congelamiento vencido ya cuenta como liberado, aunque el cron no haya pasado. |
 | `.github/workflows/sync-production-to-staging.yml` | Réplica del sync automático production → staging. No fusiona mientras staging está congelado; se reanuda al liberar. |
 
 ## Cómo se usa
 
-1. **Actions → Staging Freeze → Run workflow**
-2. `congelar`, un motivo y las horas (`0` = sin vencimiento) → todos los PR a staging quedan en rojo.
-3. Al terminar, `liberar` (o esperar al vencimiento) → los PR vuelven a verde
-   y el sync de production se pone al día.
+1. **Actions → Staging: congelar → Run workflow**: un motivo y las horas
+   (`0` = sin vencimiento) → todos los PR a staging quedan en rojo.
+2. Al terminar, **Actions → Staging: liberar → Run workflow** (o esperar al
+   vencimiento) → los PR vuelven a verde y el sync de production se pone al día.
 
 Reglas cuando hay más de una persona:
 
@@ -67,7 +70,7 @@ Reglas cuando hay más de una persona:
 2. **Token**: un *fine-grained PAT* limitado a este repo, con *Variables: Read and write*,
    guardado como secret `STAGING_FREEZE_TOKEN`. El `GITHUB_TOKEN` de Actions no puede escribir variables.
 3. **Protección de `staging`**: *Require status checks to pass* con el check `staging-freeze`.
-4. Ejecutar `liberar` una vez para que los PR ya abiertos reciban el check.
+4. Ejecutar **Staging: liberar** una vez para que los PR ya abiertos reciban el check.
 
 ## Demo
 
@@ -84,6 +87,8 @@ Reglas cuando hay más de una persona:
   que se active la protección.
 - Los workflows tienen que estar en las dos ramas: el guard corre desde `staging` y el
   botón y el cron desde la rama por defecto (`production`).
+- **Revisar el auto-merge.** Si el repo lo tiene activo, un PR programado con
+  `--auto` durante el congelamiento se mergea solo en el instante de liberar.
 - Es una barrera contra accidentes, no contra abusos: cualquiera con escritura podría
   poner el estado en verde a mano por la API. Para urgencias, la salida prevista es el
   bypass de admin en la protección de rama.

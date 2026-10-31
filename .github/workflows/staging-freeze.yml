@@ -1,28 +1,25 @@
-name: Staging Freeze
+name: Staging Freeze (núcleo)
 
-# Button to freeze or release staging; the cron releases an expired freeze
+# Shared logic behind staging-freeze-congelar.yml and staging-freeze-liberar.yml,
+# split in two so each button only shows its own fields
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       accion:
-        description: Congelar o liberar staging
-        type: choice
-        options: [congelar, liberar]
+        type: string
         required: true
       motivo:
-        description: Motivo (se muestra en cada PR a staging)
         type: string
-        required: false
+        default: ''
       horas:
-        description: Horas hasta la liberación automática (1-24; 0 = sin vencimiento)
         type: number
         default: 4
       forzar:
-        description: Liberar un congelamiento de otra persona
         type: boolean
         default: false
-  schedule:
-    - cron: '*/15 * * * *'
+    secrets:
+      STAGING_FREEZE_TOKEN:
+        required: true
 
 permissions:
   actions: write
@@ -30,18 +27,15 @@ permissions:
   pull-requests: read
   statuses: write
 
-concurrency:
-  group: staging-freeze
-  cancel-in-progress: false
-
 env:
   STAGING_BRANCH: ${{ vars.STAGING_BRANCH }}
 
 jobs:
   toggle:
-    # The cron only starts a runner while a freeze with an expiry exists (jq -c
-    # writes "until":"<ISO date>"): a skipped job costs no minutes
-    if: github.event_name == 'workflow_dispatch' || contains(vars.STAGING_FREEZE, '"until":"2')
+    # Both buttons queue on one group: a freeze and a release never interleave
+    concurrency:
+      group: staging-freeze
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

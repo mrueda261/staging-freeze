@@ -1,0 +1,30 @@
+name: 'Staging: liberar'
+
+# Manual release, plus the cron that releases an expired freeze
+on:
+  workflow_dispatch:
+    inputs:
+      forzar:
+        description: Liberar un congelamiento de otra persona
+        type: boolean
+        default: false
+  schedule:
+    - cron: '*/15 * * * *'
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  release:
+    # The cron only starts a runner while a freeze with an expiry exists (jq -c
+    # writes "until":"<ISO date>"): a skipped job costs no minutes
+    if: github.event_name == 'workflow_dispatch' || contains(vars.STAGING_FREEZE, '"until":"2')
+    uses: ./.github/workflows/staging-freeze.yml
+    with:
+      accion: liberar
+      forzar: ${{ inputs.forzar == true }}
+    secrets:
+      STAGING_FREEZE_TOKEN: ${{ secrets.STAGING_FREEZE_TOKEN }}
