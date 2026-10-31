@@ -1,0 +1,59 @@
+name: Sync Production to Staging
+
+# Prototype of RutavityERP's sync: merges production into staging on every
+# production push, and waits while staging is frozen.
+on:
+  push:
+    branches:
+      - production
+  # Dispatched by staging-freeze.yml on release
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  statuses: write
+
+env:
+  STAGING_BRANCH: ${{ vars.STAGING_BRANCH }}
+
+jobs:
+  sync:
+    # A merge into staging redeploys it: wait while it is frozen
+    if: vars.STAGING_FREEZE == ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge production into staging
+        id: merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout "$STAGING_BRANCH"
+          if [ "$(git rev-list --count "HEAD..origin/production")" -eq 0 ]; then
+            echo "✅ Staging ya tiene todo production" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git merge origin/production --no-ff -m "bot: sync production to staging"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      # The required staging-freeze check also gates pushes: the merge commit
+      # must carry the status before staging accepts it
+      - name: Push through the required check
+        if: steps.merge.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.merge.outputs.sha }}
+        run: |
+          tmp="freeze-sync/$GITHUB_RUN_ID"
+          git push origin "HEAD:refs/heads/$tmp"
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" \
+            -f state=success -f context=staging-freeze -f description="Sync production → staging" --silent
+          git push origin "HEAD:$STAGING_BRANCH"
+          git push origin --delete "$tmp"
+          echo "✅ Production sincronizado en staging ($SHA)" >> "$GITHUB_STEP_SUMMARY"

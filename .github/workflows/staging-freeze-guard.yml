@@ -1,0 +1,28 @@
+name: Staging Freeze Guard
+
+# pull_request_target runs this file from the base branch, so a PR cannot
+# edit the guard to pass itself. No PR code is checked out.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  guard:
+    if: github.base_ref == vars.STAGING_BRANCH
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions
+
+      - name: Post staging-freeze status
+        uses: ./.github/actions/staging-freeze-status
+        with:
+          freeze: ${{ vars.STAGING_FREEZE }}
+          shas: ${{ github.event.pull_request.head.sha }}
+          token: ${{ secrets.GITHUB_TOKEN }}

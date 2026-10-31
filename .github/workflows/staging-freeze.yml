@@ -1,0 +1,126 @@
+name: Staging Freeze
+
+on:
+  workflow_dispatch:
+    inputs:
+      accion:
+        description: Congelar o liberar staging
+        type: choice
+        options: [congelar, liberar]
+        required: true
+      motivo:
+        description: Motivo (se muestra en cada PR a staging)
+        type: string
+        required: false
+      horas:
+        description: Horas hasta la liberación automática (1-24)
+        type: number
+        default: 4
+  schedule:
+    - cron: '*/15 * * * *'
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: staging-freeze
+  cancel-in-progress: false
+
+env:
+  STAGING_BRANCH: ${{ vars.STAGING_BRANCH }}
+
+jobs:
+  toggle:
+    # The cron only starts a runner while a freeze exists: a skipped job costs no minutes
+    if: github.event_name == 'workflow_dispatch' || vars.STAGING_FREEZE != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions
+
+      - name: Decide and store the new state
+        id: state
+        env:
+          # Repository variables are not writable (or readable live) with GITHUB_TOKEN
+          GH_TOKEN: ${{ secrets.STAGING_FREEZE_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          ACCION: ${{ inputs.accion }}
+          MOTIVO: ${{ inputs.motivo }}
+          HORAS: ${{ inputs.horas }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          now=$(date -u +%FT%TZ)
+          # Live read: vars.* is a snapshot from when the run was queued
+          current=$(gh variable get STAGING_FREEZE --repo "$GITHUB_REPOSITORY" 2>/dev/null || true)
+
+          if [ "$EVENT" = schedule ]; then
+            until=$(jq -r '.until // empty' <<<"$current" 2>/dev/null || true)
+            if [ -n "$until" ] && [[ "$until" > "$now" ]]; then
+              echo "Sigue congelado hasta $until"
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            ACCION=liberar
+          fi
+
+          if [ "$ACCION" = congelar ]; then
+            if [ -z "$MOTIVO" ]; then
+              echo "::error::El motivo es obligatorio al congelar"
+              exit 1
+            fi
+            if ! [[ "$HORAS" =~ ^[0-9]+$ ]] || [ "$HORAS" -lt 1 ] || [ "$HORAS" -gt 24 ]; then
+              echo "::error::horas debe ser un entero entre 1 y 24 (recibido: $HORAS)"
+              exit 1
+            fi
+            until=$(date -u -d "+$HORAS hours" +%FT%TZ)
+            freeze=$(jq -nc --arg by "$ACTOR" --arg reason "$MOTIVO" --arg until "$until" \
+              '{by: $by, reason: $reason, until: $until}')
+            gh variable set STAGING_FREEZE --repo "$GITHUB_REPOSITORY" --body "$freeze"
+            echo "🧊 Staging congelado por @$ACTOR hasta $(TZ=America/Bogota date -d "$until" '+%F %H:%M') (Bogotá): $MOTIVO" >> "$GITHUB_STEP_SUMMARY"
+          else
+            freeze=''
+            if [ -n "$current" ]; then
+              gh variable delete STAGING_FREEZE --repo "$GITHUB_REPOSITORY"
+            fi
+            who=$([ "$EVENT" = schedule ] && echo "vencimiento automático" || echo "@$ACTOR")
+            echo "✅ Staging liberado ($who)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          {
+            echo "changed=true"
+            echo "accion=$ACCION"
+            echo "freeze=$freeze"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: List open PRs to staging
+        id: prs
+        if: steps.state.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "shas<<EOF"
+            gh pr list --repo "$GITHUB_REPOSITORY" --base "$STAGING_BRANCH" --state open \
+              --limit 200 --json headRefOid --jq '.[].headRefOid'
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Refresh staging-freeze status on open PRs
+        if: steps.state.outputs.changed == 'true'
+        uses: ./.github/actions/staging-freeze-status
+        with:
+          freeze: ${{ steps.state.outputs.freeze }}
+          shas: ${{ steps.prs.outputs.shas }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Production pushes skip the sync while frozen; catch staging up now
+      - name: Resume production → staging sync
+        if: steps.state.outputs.accion == 'liberar'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run sync-production-to-staging.yml --repo "$GITHUB_REPOSITORY" --ref production

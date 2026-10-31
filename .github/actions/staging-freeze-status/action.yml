@@ -1,0 +1,51 @@
+name: Staging freeze status
+description: >
+  Posts the `staging-freeze` commit status on the given SHAs: failure while a
+  freeze is active, success otherwise. Branch protection requires this context.
+
+inputs:
+  freeze:
+    description: STAGING_FREEZE JSON ({by, reason, until}); empty means not frozen
+    required: false
+    default: ''
+  shas:
+    description: Newline-separated head SHAs to mark
+    required: true
+  token:
+    description: Token with statuses:write
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Post status
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        FREEZE: ${{ inputs.freeze }}
+        SHAS: ${{ inputs.shas }}
+      run: |
+        now=$(date -u +%FT%TZ)
+        until=''
+        [ -n "$FREEZE" ] && until=$(jq -r '.until // empty' <<<"$FREEZE")
+
+        # An expired freeze reads as released even before the cron clears it
+        if [ -n "$until" ] && [[ "$until" > "$now" ]]; then
+          state=failure
+          by=$(jq -r '.by' <<<"$FREEZE")
+          reason=$(jq -r '.reason' <<<"$FREEZE")
+          local_until=$(TZ=America/Bogota date -d "$until" +%H:%M)
+          desc="Congelado por @$by hasta $local_until: $reason"
+        else
+          state=success
+          desc="Staging libre"
+        fi
+        # GitHub rejects descriptions over 140 characters
+        desc=${desc:0:140}
+
+        while read -r sha; do
+          [ -n "$sha" ] || continue
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$sha" \
+            -f state="$state" -f context=staging-freeze -f description="$desc" --silent
+          echo "$state → $sha"
+        done <<<"$SHAS"
