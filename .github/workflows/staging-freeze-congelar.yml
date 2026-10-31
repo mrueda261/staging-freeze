@@ -1,0 +1,29 @@
+name: 'Staging: congelar'
+
+on:
+  workflow_dispatch:
+    inputs:
+      motivo:
+        description: Motivo (se muestra en cada PR a staging)
+        type: string
+        required: true
+      horas:
+        description: Horas hasta la liberación automática (1-24; 0 = sin vencimiento)
+        type: number
+        default: 4
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  freeze:
+    uses: ./.github/workflows/staging-freeze.yml
+    with:
+      accion: congelar
+      motivo: ${{ inputs.motivo }}
+      horas: ${{ inputs.horas }}
+    secrets:
+      STAGING_FREEZE_TOKEN: ${{ secrets.STAGING_FREEZE_TOKEN }}
