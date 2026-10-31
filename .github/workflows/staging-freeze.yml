@@ -57,7 +57,7 @@ jobs:
         run: |
           now=$(date -u +%FT%TZ)
           # Live read: vars.* is a snapshot from when the run was queued
-          current=$(gh variable get STAGING_FREEZE --repo "$GITHUB_REPOSITORY" 2>/dev/null || true)
+          current=$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/STAGING_FREEZE" --jq .value 2>/dev/null || true)
 
           if [ "$EVENT" = schedule ]; then
             until=$(jq -r '.until // empty' <<<"$current" 2>/dev/null || true)
