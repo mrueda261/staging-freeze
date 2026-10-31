@@ -1,5 +1,6 @@
 name: Staging Freeze
 
+# Button to freeze or release staging; the cron releases an expired freeze
 on:
   workflow_dispatch:
     inputs:
