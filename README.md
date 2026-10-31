@@ -38,7 +38,7 @@ flowchart LR
 
 | Archivo | Qué hace |
 |---|---|
-| `.github/workflows/staging-freeze.yml` | Botón para congelar o liberar (motivo y horas, 1-24). Libera solo al vencer, con un cron que no gasta minutos mientras no haya congelamiento. Al cambiar de estado, actualiza el check de todos los PR abiertos. |
+| `.github/workflows/staging-freeze.yml` | Botón para congelar o liberar (motivo y horas: 1-24, o 0 sin vencimiento). Libera solo al vencer, con un cron que no gasta minutos mientras no haya un congelamiento con vencimiento. Al cambiar de estado, actualiza el check de todos los PR abiertos. |
 | `.github/workflows/staging-freeze-guard.yml` | Pone el check en cada PR a staging. Usa `pull_request_target`: corre la versión de la rama base, así que un PR no puede modificar el guard para aprobarse solo. |
 | `.github/actions/staging-freeze-status/` | Lógica compartida: decide verde o rojo y redacta el mensaje. Un congelamiento vencido ya cuenta como liberado, aunque el cron no haya pasado. |
 | `.github/workflows/sync-production-to-staging.yml` | Réplica del sync automático production → staging. No fusiona mientras staging está congelado; se reanuda al liberar. |
@@ -46,7 +46,7 @@ flowchart LR
 ## Cómo se usa
 
 1. **Actions → Staging Freeze → Run workflow**
-2. `congelar`, un motivo y las horas → todos los PR a staging quedan en rojo.
+2. `congelar`, un motivo y las horas (`0` = sin vencimiento) → todos los PR a staging quedan en rojo.
 3. Al terminar, `liberar` (o esperar al vencimiento) → los PR vuelven a verde
    y el sync de production se pone al día.
 
@@ -58,6 +58,8 @@ Reglas cuando hay más de una persona:
 - **Solo el dueño libera.** Cualquier otra persona tiene que marcar `forzar`, y
   la liberación forzada queda registrada con su nombre en el resumen del run.
 - Un congelamiento vencido ya no cuenta: cualquiera puede congelar encima.
+- **La liberación automática es opcional**: con `horas = 0` el congelamiento no
+  vence y dura hasta que su dueño lo libere (o alguien lo fuerce).
 
 ## Configuración (una sola vez, requiere admin del repo)
 
