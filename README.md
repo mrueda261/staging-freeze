@@ -50,6 +50,15 @@ flowchart LR
 3. Al terminar, `liberar` (o esperar al vencimiento) → los PR vuelven a verde
    y el sync de production se pone al día.
 
+Reglas cuando hay más de una persona:
+
+- **Un congelamiento a la vez.** Si staging ya está congelado por otra persona,
+  `congelar` falla y dice quién lo tiene, hasta cuándo y por qué.
+- **El dueño puede volver a congelar** para extender el tiempo o cambiar el motivo.
+- **Solo el dueño libera.** Cualquier otra persona tiene que marcar `forzar`, y
+  la liberación forzada queda registrada con su nombre en el resumen del run.
+- Un congelamiento vencido ya no cuenta: cualquiera puede congelar encima.
+
 ## Configuración (una sola vez, requiere admin del repo)
 
 1. **Variable** `STAGING_BRANCH` = `staging` (Settings → Secrets and variables → Actions → Variables).
