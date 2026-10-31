@@ -26,16 +26,23 @@ runs:
         SHAS: ${{ inputs.shas }}
       run: |
         now=$(date -u +%FT%TZ)
-        until=''
-        [ -n "$FREEZE" ] && until=$(jq -r '.until // empty' <<<"$FREEZE")
+        by='' until=''
+        if [ -n "$FREEZE" ]; then
+          by=$(jq -r '.by // empty' <<<"$FREEZE")
+          until=$(jq -r '.until // empty' <<<"$FREEZE")
+        fi
 
-        # An expired freeze reads as released even before the cron clears it
-        if [ -n "$until" ] && [[ "$until" > "$now" ]]; then
+        # An expired freeze reads as released even before the cron clears it;
+        # one with no expiry holds until someone releases it
+        if [ -n "$by" ] && { [ -z "$until" ] || [[ "$until" > "$now" ]]; }; then
           state=failure
-          by=$(jq -r '.by' <<<"$FREEZE")
           reason=$(jq -r '.reason' <<<"$FREEZE")
-          local_until=$(TZ=America/Bogota date -d "$until" +%H:%M)
-          desc="Congelado por @$by hasta $local_until: $reason"
+          if [ -n "$until" ]; then
+            span="hasta $(TZ=America/Bogota date -d "$until" +%H:%M)"
+          else
+            span="sin vencimiento"
+          fi
+          desc="Congelado por @$by $span: $reason"
         else
           state=success
           desc="Staging libre"

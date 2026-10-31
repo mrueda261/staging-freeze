@@ -14,7 +14,7 @@ on:
         type: string
         required: false
       horas:
-        description: Horas hasta la liberación automática (1-24)
+        description: Horas hasta la liberación automática (1-24; 0 = sin vencimiento)
         type: number
         default: 4
       forzar:
@@ -39,8 +39,9 @@ env:
 
 jobs:
   toggle:
-    # The cron only starts a runner while a freeze exists: a skipped job costs no minutes
-    if: github.event_name == 'workflow_dispatch' || vars.STAGING_FREEZE != ''
+    # The cron only starts a runner while a freeze with an expiry exists (jq -c
+    # writes "until":"<ISO date>"): a skipped job costs no minutes
+    if: github.event_name == 'workflow_dispatch' || contains(vars.STAGING_FREEZE, '"until":"2')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -66,12 +67,18 @@ jobs:
           owner=$(jq -r '.by // empty' <<<"$current" 2>/dev/null || true)
           until=$(jq -r '.until // empty' <<<"$current" 2>/dev/null || true)
           active=false
-          if [ -n "$until" ] && [[ "$until" > "$now" ]]; then active=true; fi
-          held_by="@$owner hasta $(TZ=America/Bogota date -d "${until:-$now}" +%H:%M): $(jq -r '.reason // empty' <<<"$current" 2>/dev/null || true)"
+          # A freeze with no expiry holds until someone releases it
+          if [ -n "$owner" ] && { [ -z "$until" ] || [[ "$until" > "$now" ]]; }; then active=true; fi
+          if [ -n "$until" ]; then
+            span="hasta $(TZ=America/Bogota date -d "$until" +%H:%M)"
+          else
+            span="sin vencimiento"
+          fi
+          held_by="@$owner $span: $(jq -r '.reason // empty' <<<"$current" 2>/dev/null || true)"
 
           if [ "$EVENT" = schedule ]; then
             if [ "$active" = true ]; then
-              echo "Sigue congelado hasta $until"
+              echo "Sigue congelado ($span)"
               echo "changed=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -93,15 +100,21 @@ jobs:
               echo "::error::El motivo es obligatorio al congelar"
               exit 1
             fi
-            if ! [[ "$HORAS" =~ ^[0-9]+$ ]] || [ "$HORAS" -lt 1 ] || [ "$HORAS" -gt 24 ]; then
-              echo "::error::horas debe ser un entero entre 1 y 24 (recibido: $HORAS)"
+            if ! [[ "$HORAS" =~ ^[0-9]+$ ]] || [ "$HORAS" -gt 24 ]; then
+              echo "::error::horas debe ser un entero entre 0 y 24 (recibido: $HORAS)"
               exit 1
             fi
-            until=$(date -u -d "+$HORAS hours" +%FT%TZ)
+            if [ "$HORAS" -eq 0 ]; then
+              until=''
+              span="sin vencimiento"
+            else
+              until=$(date -u -d "+$HORAS hours" +%FT%TZ)
+              span="hasta $(TZ=America/Bogota date -d "$until" '+%F %H:%M') (Bogotá)"
+            fi
             freeze=$(jq -nc --arg by "$ACTOR" --arg reason "$MOTIVO" --arg until "$until" \
               '{by: $by, reason: $reason, until: $until}')
             gh variable set STAGING_FREEZE --repo "$GITHUB_REPOSITORY" --body "$freeze"
-            echo "🧊 Staging congelado por @$ACTOR hasta $(TZ=America/Bogota date -d "$until" '+%F %H:%M') (Bogotá): $MOTIVO" >> "$GITHUB_STEP_SUMMARY"
+            echo "🧊 Staging congelado por @$ACTOR $span: $MOTIVO" >> "$GITHUB_STEP_SUMMARY"
           else
             freeze=''
             if [ -n "$current" ]; then
