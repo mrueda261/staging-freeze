@@ -24,6 +24,7 @@ jobs:
     with:
       accion: congelar
       motivo: ${{ inputs.motivo }}
-      horas: ${{ inputs.horas }}
+      # Dispatched from the API or gh, number inputs arrive as strings
+      horas: ${{ fromJSON(inputs.horas) }}
     secrets:
       STAGING_FREEZE_TOKEN: ${{ secrets.STAGING_FREEZE_TOKEN }}
